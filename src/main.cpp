@@ -21,7 +21,7 @@ void setup() {
   // I2C initialisering (ikke nødvendigt med standard pins)
   Wire.begin(SDA_PIN, SCL_PIN);
 
-  // BME280 opsætning
+  // BME280 opsætning dawd 
   bool status = bme.begin(0x76);  // Tjek om 0x76 virker, ellers prøv 0x77
   if (!status) {
     Serial.println("[FEJL] Kunne ikke finde BME280. Tjek ledninger og adresse!");
