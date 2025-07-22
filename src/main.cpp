@@ -1,61 +1,94 @@
-
-#include <Arduino.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 
-// ------------------- PINDEFINERINGER -------------------
-#define LDR_PIN 15         // LDR til analog pin 15
-#define RAIN_PIN 2        // Regnsensor til analog pin 17
-#define SDA_PIN 21         // I2C SDA (valgfrit, default for ESP32)
-#define SCL_PIN 22         // I2C SCL (valgfrit, default for ESP32)
+// ----------- WiFi og MQTT-indstillinger -----------
+const char* ssid = "Waoo4920_8847";
+const char* password = "ckdd4889";  // ← WiFi-adgangskode
+const char* mqtt_server = "192.168.1.5"; // Din Ubuntu-server IP
 
-// ------------------- SENSOR OBJEKTER -------------------
-Adafruit_BME280 bme;       // BME280 objekt
+WiFiClient espClient;
+PubSubClient client(espClient);
 
-// ------------------- SETUP -------------------
+// ----------- Pins -----------
+#define LDR_PIN 33
+#define RAIN_PIN 32
+#define SDA_PIN 21
+#define SCL_PIN 22
+
+Adafruit_BME280 bme;
+
+// ----------- WiFi-forbindelse -----------
+void setup_wifi() {
+  delay(100);
+  Serial.println("[WIFI] Forbinder til WiFi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\n[WIFI] Tilsluttet! IP: " + WiFi.localIP().toString());
+}
+
+// ----------- MQTT-genforbindelse -----------
+void reconnect() {
+  while (!client.connected()) {
+    Serial.print("[MQTT] Forbinder...");
+    if (client.connect("ESP32_vejrstation")) {
+      Serial.println(" forbundet!");
+    } else {
+      Serial.print(" fejl, rc=");
+      Serial.print(client.state());
+      Serial.println(" → prøver igen om 5 sek.");
+      delay(5000);
+    }
+  }
+}
+
+// ----------- Setup -----------
 void setup() {
   Serial.begin(115200);
-  delay(1000); // Vent lidt på serielforbindelse
-
-  // I2C initialisering (ikke nødvendigt med standard pins)
   Wire.begin(SDA_PIN, SCL_PIN);
 
-  // BME280 opsætning dawd 
-  bool status = bme.begin(0x76);  // Tjek om 0x76 virker, ellers prøv 0x77
-  if (!status) {
-    Serial.println("[FEJL] Kunne ikke finde BME280. Tjek ledninger og adresse!");
+  if (!bme.begin(0x76)) {
+    Serial.println("[FEJL] Kunne ikke finde BME280. Tjek forbindelsen!");
     while (1);
   }
 
-  // Konfigurer analoge input pins
   pinMode(LDR_PIN, INPUT);
   pinMode(RAIN_PIN, INPUT);
 
-  Serial.println("[INFO] Sensorer initialiseret. Starter målinger...");
+  setup_wifi();
+  client.setServer(mqtt_server, 1883);
+
+  Serial.println("[INFO] Systemet er klar.");
 }
 
-// ------------------- LOOP -------------------
+// ----------- Loop -----------
 void loop() {
-  // Læs BME280 værdier
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
   float temperatur = bme.readTemperature();
   float fugtighed = bme.readHumidity();
-  float tryk = bme.readPressure() / 100.0F; // hPa
-
-  // Læs analoge værdier
+  float tryk = bme.readPressure() / 100.0F;
   int lysValue = analogRead(LDR_PIN);
   int regnValue = analogRead(RAIN_PIN);
 
-  // Udskriv resultater
-  Serial.println("------------------------------");
-  Serial.print("Temperatur: "); Serial.print(temperatur); Serial.println(" °C");
-  Serial.print("Fugtighed: "); Serial.print(fugtighed); Serial.println(" %");
-  Serial.print("Tryk: "); Serial.print(tryk); Serial.println(" hPa");
+  client.publish("vejr/temperatur", String(temperatur).c_str());
+  client.publish("vejr/fugtighed", String(fugtighed).c_str());
+  client.publish("vejr/tryk", String(tryk).c_str());
+  client.publish("vejr/lys", String(lysValue).c_str());
+  client.publish("vejr/regn", String(regnValue).c_str());
 
-  Serial.print("Lysniveau (LDR): "); Serial.println(lysValue);
-  Serial.print("Regnsensor (analog): "); Serial.println(regnValue);
+  Serial.println("[MQTT] Data sendt:");
+  Serial.printf("Temp: %.2f °C | Fugt: %.1f %% | Tryk: %.1f hPa\n", temperatur, fugtighed, tryk);
+  Serial.printf("Lys: %d | Regn: %d\n", lysValue, regnValue);
   Serial.println("------------------------------\n");
 
-  delay(3000); // Vent 3 sekunder
+  delay(3000);  // 3 sekunders interval
 }
-
